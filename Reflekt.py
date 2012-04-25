@@ -23,8 +23,9 @@ COLORS = {
     }
 
 boxs =[]
+mirror_colors=[]
 animations=[]
-marked_box = None
+marked_box = -1
 
 class Box(pygame.sprite.Sprite):
     """pure color block as sprite which has two states: marked and unmarked"""
@@ -54,33 +55,33 @@ class Box(pygame.sprite.Sprite):
 
 class Animation():
     """basic animation unit, an animation will be started only when it's parent is finished"""
-    def __init__(self, action, box, target, parent = None, state = None):
+    def __init__(self, action, box, target, state = None, parent = None):
         self.action = action
         self.box    = box
         self.target = target
         self.parent = parent
         self.state  = state
+        self.finished = False
 
     def update(self):
-        finished = True
         if(self.action == "move"):
             topleft = self.box.rect.topleft
             if not topleft == self.target:
-                finished = False
                 x_speed = MOVE_SPEED*cmp(self.target[0] - topleft[0], 0)
                 y_speed = MOVE_SPEED*cmp(self.target[1] - topleft[1], 0)
                 self.box.rect = self.box.rect.move((x_speed,y_speed))
-        elif(animation[1] == "zoom_out"):
+            else:
+                self.finished = True
+        elif(self.action == "zoom_out"):
             box_side = self.box.image.get_size()[0]
             if not box_side == self.target:
-                finished = False
                 self.box.image = pygame.transform.scale(self.box.image, (box_side - SCALE_SPEED, )*2)
                 self.box.rect = self.box.rect.move((SCALE_SPEED/2, )*2)
             else:
+                self.finished = True
                 self.box.image = self.state
                 box_side = self.box.image.get_size()[0]
                 self.box.rect = self.box.rect.move(((self.target - box_side)/2, )*2)
-        return finished
         
 def generate_boxs():
     boxs = [] 
@@ -92,26 +93,24 @@ def generate_boxs():
             boxs.append(b)
     return boxs
 
-def find_box(pos):
+def generate_mirror_colors(boxs):
     for box in boxs:
-        topleft = box.rect.topleft
-        if pos[0] - (topleft[0] - PADDING/2) < 0:   
-            continue
-        if pos[0] - (topleft[0] - PADDING/2) >= BLOCK_SIDE:
-            continue
-        if pos[1] - (topleft[1] - PADDING/2) < 0:
-            continue
-        if pos[1] - (topleft[1] - PADDING/2) >= BLOCK_SIDE:
-            continue
-        return box
-    return None
+        colr = box.color
+
+def pos_to_index(pos):
+    index =  pos[0]/BLOCK_SIDE + COLS*(pos[1]/BLOCK_SIDE)
+    return index if index >= 0 and index < len(boxs) else -1
+
+def switch_box(indexA, indexB):
+    global boxs, animations
+    boxs[indexA], boxs[indexB] = boxs[indexB], boxs[indexA]
+    animations.append(Animation("move", boxs[indexA], boxs[indexB].rect.topleft))
+    animations.append(Animation("move", boxs[indexB], boxs[indexA].rect.topleft))
 
 def is_around(you, me):
-    p_you = you.rect.topleft
-    p_me  = me.rect.topleft
-    if abs(p_you[0] - p_me[0]) in (0, BOX_SIDE + PADDING) and p_you[1] == p_me[1]:
+    if you/COLS == me/COLS and (you - me) in (-1,0,1):
         return True
-    elif abs(p_you[1]-p_me[1]) in (0, BOX_SIDE + PADDING) and p_you[0] == p_me[0]:
+    if (you - me) in (-COLS, COLS):
         return True
     return False
 
@@ -119,39 +118,32 @@ def click_at(pos):
     global boxs, marked_box, animations
     if len(animations) > 0:
         return
-    clicked_box = find_box(pos)
-    if not clicked_box:
+    clicked_box = pos_to_index(pos)
+    if clicked_box == -1:
         return
-    if marked_box is None:
-        clicked_box.clicked()
+    if marked_box == -1:
+        boxs[clicked_box].clicked()
         marked_box = clicked_box
     elif clicked_box == marked_box:
-        clicked_box.clicked()
-        marked_box = None
+        boxs[clicked_box].clicked()
+        marked_box = -1
     elif is_around(clicked_box, marked_box):
-        marked_box.clicked()
-        selected_move     = [None, "move", clicked_box, marked_box.rect.topleft]
-        selected_zoom_out = [selected_move, "zoom_out", clicked_box, (0,0), clicked_box.image]
-        marked_move       = [None, "move", marked_box, clicked_box.rect.topleft]
-        animations.extend([selected_move, selected_zoom_out, marked_move])
-        marked_box = None
+        boxs[marked_box].clicked()
+        switch_box(clicked_box, marked_box)
+        marked_box = -1
+        # selected_zoom_out = Animation("zoom_out", clicked_box, 0, clicked_box.image, selected_move)
 
-
-
-def run_animations():
-    global animations
-    finished = []
+def run_animations(animations):
     for animation in animations:
-        if not animation[0]:
-            if not update_animation(animation):
-                finished.append(animation)
+        if not animation.parent:
+            animation.update()
     new_animations = []
     for animation in animations:
-        if not animation in finished:
-            if animation[0] in finished:
-                animation[0] = animation[0][0]
+        if not animation.finished:
             new_animations.append(animation)
-    animations = new_animations
+            if animation.parent and animation.parent.finished:
+                animation.parent = animation.parent.parent
+    return new_animations
 
 
 def main():
@@ -167,14 +159,14 @@ def main():
     #screen.blit(background, [0,0])
     # pygame.display.flip()
 
-    global boxs
+    global boxs, animations
     boxs = generate_boxs()
 
     pygame.display.update()
     clock = pygame.time.Clock()
     while 1:
         clock.tick(60)
-        run_animations()
+        animations = run_animations(animations)
         for event in pygame.event.get():
             if event.type == QUIT:
                 return

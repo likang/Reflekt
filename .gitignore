@@ -1,0 +1,4 @@
+*.pyc
+.svn
+.DS_STORE
+
