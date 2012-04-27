@@ -9,7 +9,7 @@ ROWS        = 4
 COLS        = 6
 MOVE_SPEED  = 8 # BOX_SIDE + PADDING must be divided by SPPED exactly
 SCALE_SPEED = 10
-WINDOW_POSITION = "DOWN"
+IN_MIRROR   = False
 BLOCK_SIDE  = BOX_SIDE + PADDING
 
 BG_COLOR   = (0,0,0)
@@ -47,19 +47,17 @@ class Box(pygame.sprite.Sprite):
 
 class Animation():
     """basic animation unit, an animation will be started only when it's parent is finished"""
-    def __init__(self, action, box_index, target = None, state = None, parent = None):
+    def __init__(self, action, box, target = None, state = None, parent = None):
         self.action = action
+        self.box    = box
         self.target = target
         self.parent = parent
         self.state  = state
-        self.box_index = box_index
         self.finished  = False
 
     def update(self):
-        global boxs
-        box = boxs[self.box_index]
         if(self.action == "change_color"):
-            box.image = self.target
+            self.box.image = self.target
             self.finished = True
         elif(self.action == "jump"):
             self.box.move((self.target[0] - self.box.rect.left, self.target[1] - self.box.rect.top))
@@ -71,6 +69,8 @@ class Animation():
                 y_speed = MOVE_SPEED*cmp(self.target[1] - topleft[1], 0)
                 self.box.move((x_speed,y_speed))
             else:
+                global boxs
+                boxs[self.target[0]/BLOCK_SIDE + COLS*(self.target[1]/BLOCK_SIDE)] = self.box
                 self.finished = True
         elif(self.action == "zoom_out"):
             box_side = self.box.image.get_size()[0]
@@ -80,12 +80,17 @@ class Animation():
             else:
                 self.finished = True
                 self.box.move((self.state[0] - self.box.rect.left, self.state[1] - self.box.rect.top))
+        else:
+            self.finished = True
 
-def get_mirror_index(index):
-    if WINDOW_POSITION == "DOWN":
-        return index
-    else:
-        return (ROWS - index/COLS) * COLS + index%COLS
+def get_random_color():
+    return  random.choice(COLORS.keys())
+
+def get_different_color(color):
+    while True:
+        new_color = get_random_color()
+        if new_color != color:
+            return new_color
 
 def get_surface(color, marked = False):
     global surfaces
@@ -106,11 +111,10 @@ def get_surface(color, marked = False):
         
 def generate_boxs():
     boxs = [] 
-    color_keys = COLORS.keys()
     for y in range(0,ROWS):
         for x in range(0,COLS):
-            r = random.randint(0,len(color_keys)-1)
-            b = Box(color_keys[r], (PADDING/2 + BLOCK_SIDE*x, PADDING/2 + BLOCK_SIDE*y))
+            color = get_random_color()
+            b = Box(color , (PADDING/2 + BLOCK_SIDE*x, PADDING/2 + BLOCK_SIDE*y))
             boxs.append(b)
     return boxs
 
@@ -121,10 +125,6 @@ def generate_mirror_colors(boxs):
 def pos_to_index(pos):
     index =  pos[0]/BLOCK_SIDE + COLS*(pos[1]/BLOCK_SIDE)
     return index if index >= 0 and index < len(boxs) else -1
-
-def switch_box(indexA, indexB):
-    global boxs
-    boxs[indexA], boxs[indexB] = boxs[indexB], boxs[indexA]
 
 def is_around(you, me):
     if you/COLS == me/COLS and (you - me) in (-1,0,1):
@@ -145,37 +145,43 @@ def click_at(pos):
         boxs[clicked_box_index].mark(False)
         marked_box_index = -1
     elif is_around(clicked_box_index, marked_box_index):
-        switch_box(clicked_box_index, marked_box_index)
-        marked_box_index, clicked_box_index = clicked_box_index, marked_box_index
         marked_box = boxs[marked_box_index]
         clicked_box = boxs[clicked_box_index]
         marked_box.mark(False)
-        cmds.append("1 0 move %s %s %s" % (clicked_box_index, marked_box.rect.left, marked_box.rect.top))
-        cmds.append("2 0 move %s %s %s" % (marked_box_index, clicked_box.rect.left, clicked_box.rect.top))
-        cmds.append("3 1 zoom_out %s %s %s %s" % (clicked_box_index, 0, clicked_box.rect.left, clicked_box.rect.top))
-        cmds.append("4 2 zoom_out %s %s %s %s" % (marked_box_index, 0, marked_box.rect.left, marked_box.rect.top))
+        cmds.append("move %s %s" % (clicked_box_index, marked_box_index))
+        cmds.append("move_and_disappear %s %s" % (marked_box_index, clicked_box_index))
+        # cmds.append("3 1 zoom_out %s %s" % (clicked_box_index, 0))
+        # cmds.append("4 2 zoom_out %s %s" % (marked_box_index, 0))
         marked_box_index = -1
         # selected_zoom_out = Animation("zoom_out", clicked_box, 0, clicked_box.image, selected_move)
 
 def parse_command(command_str):
     commands = command_str.split(";")
     cmd_tmp = {}
+    animations = []
     for command in commands:
         params = command.split()
         animation = Animation(params[2], boxs[int(params[3])])
         cmd_tmp[params[0]] = animation
+        animations.append(animation)
         animation.parent = cmd_tmp.get(params[1])
         if animation.action == "move":
-            animation.target = (int(params[4]), int(params[5]))
+        animation = Animation(params[2], boxs[int(params[3])])
+            target_box = boxs[int(params[4])]
+            animation.target = target_box.rect.topleft
         elif animation.action == "zoom_out":
             animation.target = int(params[4])
-            animation.state = (int(params[5]), int(params[6]))
+            animation.state = animation.box.rect.topleft
         elif animation.action == "jump":
             animation.target = (int(params[4]), int(params[5]))
         elif animation.action == "change_color":
             animation.target = params[4]
+        elif animation.action == "landslip":
+            if len(params) == 5:
+                box = boxs[int(params[3])]
+                zoom_animation = Animation("zoom_out", box,)
 
-    return cmd_tmp.values()
+    return animations
 
 def run_animations(animations):
     for animation in animations:
@@ -200,13 +206,10 @@ def main():
     background = pygame.Surface(screen.get_size())
     background = background.convert()
     background.fill(BG_COLOR)
-    #screen.blit(background, [0,0])
-    # pygame.display.flip()
 
     global boxs, animations,cmds
     boxs = generate_boxs()
 
-    pygame.display.update()
     clock = pygame.time.Clock()
     while 1:
         clock.tick(60)
@@ -221,11 +224,14 @@ def main():
             elif event.type == MOUSEBUTTONUP:
                 if len(animations) == 0:
                     click_at(event.pos)
-        screen.blit(background, [0,0])
+        screen.blit(background, (0,0))
         for box in boxs:
             # box.draw(screen)
             screen.blit(box.image, box.rect)
-        pygame.display.update()
-        # pygame.display.flip()
+        if IN_MIRROR:
+            mirror = pygame.transform.flip(screen, False, True)
+            screen.blit(background, (0,0))
+            screen.blit(mirror, (0,0))
+        pygame.display.flip()
 
 if __name__ == '__main__': main()
