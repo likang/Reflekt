@@ -148,10 +148,16 @@ def click_at(pos):
         marked_box = boxs[marked_box_index]
         clicked_box = boxs[clicked_box_index]
         marked_box.mark(False)
-        cmds.append("move %s %s" % (clicked_box_index, marked_box_index))
-        cmds.append("move_and_disappear %s %s" % (marked_box_index, clicked_box_index))
-        # cmds.append("3 1 zoom_out %s %s" % (clicked_box_index, 0))
-        # cmds.append("4 2 zoom_out %s %s" % (marked_box_index, 0))
+        cmds.append("1 0 move %s %s" % (clicked_box_index, marked_box_index))
+        cmds.append("2 0 move %s %s" % (marked_box_index, clicked_box_index))
+        cmds.append("3 1 zoom_out %s %s" % (clicked_box_index, 0))
+        cmds.append("4 2 zoom_out %s %s" % (marked_box_index, 0))
+        if clicked_box_index - marked_box_index in (COLS, -COLS):
+            cmds.append("5 3 landslip %s %s %s 1" % (min(clicked_box_index, marked_box_index), get_random_color(),max(clicked_box_index, marked_box_index) + COLS))
+            cmds.append("6 5 landslip %s %s %s 2" % (max(clicked_box_index, marked_box_index), get_random_color(),max(clicked_box_index, marked_box_index) + COLS))
+        else:
+            cmds.append("5 3 landslip %s %s %s 1" % (clicked_box_index, get_random_color(), clicked_box_index + COLS))
+            cmds.append("6 4 landslip %s %s %s 1" % (marked_box_index, get_random_color(), marked_box_index + COLS))
         marked_box_index = -1
         # selected_zoom_out = Animation("zoom_out", clicked_box, 0, clicked_box.image, selected_move)
 
@@ -166,7 +172,6 @@ def parse_command(command_str):
         animations.append(animation)
         animation.parent = cmd_tmp.get(params[1])
         if animation.action == "move":
-        animation = Animation(params[2], boxs[int(params[3])])
             target_box = boxs[int(params[4])]
             animation.target = target_box.rect.topleft
         elif animation.action == "zoom_out":
@@ -177,9 +182,32 @@ def parse_command(command_str):
         elif animation.action == "change_color":
             animation.target = params[4]
         elif animation.action == "landslip":
-            if len(params) == 5:
-                box = boxs[int(params[3])]
-                zoom_animation = Animation("zoom_out", box,)
+            animation.action = "jump"
+            animation.target = (animation.box.rect.left, ROWS*BLOCK_SIDE + PADDING/2)
+
+            change_color_animation = Animation("change_color", animation.box, get_surface(params[4]))
+            change_color_animation.parent = animation.parent
+            animations.append(change_color_animation)
+
+            move_animation = Animation("move", animation.box)
+            move_animation.target = (move_animation.box.rect.left, (ROWS - 1)*BLOCK_SIDE + PADDING/2)
+            move_animation.parent = animation.parent
+            animations.append(move_animation)
+            cmd_tmp[params[0]] = move_animation
+            
+            if params[6] == "2":
+                another_move_animation = Animation("move", move_animation.parent.box)
+                another_move_animation.target = (another_move_animation.box.rect.left, (ROWS - 2)*BLOCK_SIDE + PADDING/2)
+                another_move_animation.parent = move_animation.parent
+                animations.append(another_move_animation)
+
+            start_index = int(params[5])
+            while start_index < len(boxs):
+                new_animation = Animation("move", boxs[start_index])
+                new_animation.target = (new_animation.box.rect.left, new_animation.box.rect.top - BLOCK_SIDE * int(params[6]))
+                new_animation.parent = animation.parent
+                animations.append(new_animation)
+                start_index += COLS
 
     return animations
 
