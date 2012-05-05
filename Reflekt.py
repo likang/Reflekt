@@ -25,7 +25,7 @@ cmds = []
 boxs =[]
 mirror_colors=[]
 animations=[]
-marked_box_index = -1
+marked_index = -1
 surfaces={}
 
 class Box(pygame.sprite.Sprite):
@@ -47,23 +47,19 @@ class Box(pygame.sprite.Sprite):
 
 class Animation():
     """basic animation unit, an animation will be started only when it's parent is finished"""
-    def __init__(self, action, box, target = None, state = None, parent = None):
+    def __init__(self, action, box, target = None, parent = None):
         self.action = action
         self.box    = box
         self.target = target
         self.parent = parent
-        self.state  = state
         self.finished  = False
+        self.first_run = True 
 
     def update(self):
-        if(self.action == "change_color"):
-            self.box.image = self.target
-            self.finished = True
-        elif(self.action == "jump"):
-            self.box.move((self.target[0] - self.box.rect.left, self.target[1] - self.box.rect.top))
-            self.finished = True
-        elif(self.action == "move"):
+        if(self.action == "move"):
             topleft = self.box.rect.topleft
+            if self.first_run:
+                self.target = (topleft[0] + self.target[0]*BLOCK_SIDE, topleft[1] + self.target[1]*BLOCK_SIDE)
             if not topleft == self.target:
                 x_speed = MOVE_SPEED*cmp(self.target[0] - topleft[0], 0)
                 y_speed = MOVE_SPEED*cmp(self.target[1] - topleft[1], 0)
@@ -72,16 +68,18 @@ class Animation():
                 global boxs
                 boxs[self.target[0]/BLOCK_SIDE + COLS*(self.target[1]/BLOCK_SIDE)] = self.box
                 self.finished = True
-        elif(self.action == "zoom_out"):
+        elif(self.action == "renew"):
             box_side = self.box.image.get_size()[0]
-            if not box_side == self.target:
+            if not box_side == 0:
                 self.box.image = pygame.transform.scale(self.box.image, (box_side - SCALE_SPEED, )*2)
                 self.box.move((SCALE_SPEED/2, )*2)
             else:
                 self.finished = True
-                self.box.move((self.state[0] - self.box.rect.left, self.state[1] - self.box.rect.top))
+                self.box.move((-(self.box.rect.left%BLOCK_SIDE)+PADDING/2, ROWS*BLOCK_SIDE+PADDING/2-self.box.rect.top))
+                self.box.image = get_surface(self.target)
         else:
             self.finished = True
+        self.first_run = False
 
 def get_random_color():
     return  random.choice(COLORS.keys())
@@ -133,33 +131,31 @@ def is_around(you, me):
         return True
     return False
 
+def get_move(start, end):
+    return (start, end%COLS - start%COLS, end/COLS - start/COLS)
+
 def click_at(pos):
-    global boxs, marked_box_index, cmds
-    clicked_box_index = pos_to_index(pos)
-    if clicked_box_index == -1:
+    global boxs, marked_index, cmds
+    clicked_index= pos_to_index(pos)
+    if clicked_index == -1:
         return
-    if marked_box_index == -1:
-        boxs[clicked_box_index].mark(True)
-        marked_box_index = clicked_box_index
-    elif clicked_box_index == marked_box_index:
-        boxs[clicked_box_index].mark(False)
-        marked_box_index = -1
-    elif is_around(clicked_box_index, marked_box_index):
-        marked_box = boxs[marked_box_index]
-        clicked_box = boxs[clicked_box_index]
+    if marked_index == -1:
+        boxs[clicked_index].mark(True)
+        marked_index = clicked_index
+    elif clicked_index == marked_index:
+        boxs[clicked_index].mark(False)
+        marked_index = -1
+    elif is_around(clicked_index, marked_index):
+        marked_box = boxs[marked_index]
+        clicked_box = boxs[clicked_index]
         marked_box.mark(False)
-        cmds.append("1 0 move %s %s" % (clicked_box_index, marked_box_index))
-        cmds.append("2 0 move %s %s" % (marked_box_index, clicked_box_index))
-        cmds.append("3 1 zoom_out %s %s" % (clicked_box_index, 0))
-        cmds.append("4 2 zoom_out %s %s" % (marked_box_index, 0))
-        if clicked_box_index - marked_box_index in (COLS, -COLS):
-            cmds.append("5 3 landslip %s %s %s 1" % (min(clicked_box_index, marked_box_index), get_random_color(),max(clicked_box_index, marked_box_index) + COLS))
-            cmds.append("6 5 landslip %s %s %s 2" % (max(clicked_box_index, marked_box_index), get_random_color(),max(clicked_box_index, marked_box_index) + COLS))
-        else:
-            cmds.append("5 3 landslip %s %s %s 1" % (clicked_box_index, get_random_color(), clicked_box_index + COLS))
-            cmds.append("6 4 landslip %s %s %s 1" % (marked_box_index, get_random_color(), marked_box_index + COLS))
-        marked_box_index = -1
-        # selected_zoom_out = Animation("zoom_out", clicked_box, 0, clicked_box.image, selected_move)
+        cmds.append("1 0 move %s %s %s" % get_move(clicked_index, marked_index))
+        cmds.append("2 0 move %s %s %s" % get_move(marked_index, clicked_index))
+        cmds.append("3 1 renew %s %s" % (clicked_index, get_random_color()))
+        cmds.append("4 2 renew %s %s" % (marked_index, get_random_color()))
+        cmds.append("5 3 landslip %s %s"  % (clicked_index, marked_index))
+
+        marked_index = -1
 
 def parse_command(command_str):
     commands = command_str.split(";")
@@ -169,45 +165,26 @@ def parse_command(command_str):
         params = command.split()
         animation = Animation(params[2], boxs[int(params[3])])
         cmd_tmp[params[0]] = animation
-        animations.append(animation)
         animation.parent = cmd_tmp.get(params[1])
         if animation.action == "move":
-            target_box = boxs[int(params[4])]
-            animation.target = target_box.rect.topleft
-        elif animation.action == "zoom_out":
-            animation.target = int(params[4])
-            animation.state = animation.box.rect.topleft
-        elif animation.action == "jump":
             animation.target = (int(params[4]), int(params[5]))
-        elif animation.action == "change_color":
+            animations.append(animation)
+        elif animation.action == "renew":
             animation.target = params[4]
+            animations.append(animation)
         elif animation.action == "landslip":
-            animation.action = "jump"
-            animation.target = (animation.box.rect.left, ROWS*BLOCK_SIDE + PADDING/2)
-
-            change_color_animation = Animation("change_color", animation.box, get_surface(params[4]))
-            change_color_animation.parent = animation.parent
-            animations.append(change_color_animation)
-
-            move_animation = Animation("move", animation.box)
-            move_animation.target = (move_animation.box.rect.left, (ROWS - 1)*BLOCK_SIDE + PADDING/2)
-            move_animation.parent = animation.parent
-            animations.append(move_animation)
-            cmd_tmp[params[0]] = move_animation
-            
-            if params[6] == "2":
-                another_move_animation = Animation("move", move_animation.parent.box)
-                another_move_animation.target = (another_move_animation.box.rect.left, (ROWS - 2)*BLOCK_SIDE + PADDING/2)
-                another_move_animation.parent = move_animation.parent
-                animations.append(another_move_animation)
-
-            start_index = int(params[5])
-            while start_index < len(boxs):
-                new_animation = Animation("move", boxs[start_index])
-                new_animation.target = (new_animation.box.rect.left, new_animation.box.rect.top - BLOCK_SIDE * int(params[6]))
-                new_animation.parent = animation.parent
-                animations.append(new_animation)
-                start_index += COLS
+            landslips = sorted([int(x) for x in params[3:]], reverse=True)
+            parent = animation.parent
+            for start_index in landslips:
+                for box in boxs[start_index::COLS]:
+                    move_animation = Animation("move", box)
+                    move_animation.target = (0, -1)
+                    move_animation.parent = parent
+                    animations.append(move_animation)
+                if len(landslips) == 2 and landslips[1] - landslips[0] == COLS:
+                    parent = animations[-1]
+                # break
+            cmd_tmp[params[0]] = animations[-1]
 
     return animations
 
