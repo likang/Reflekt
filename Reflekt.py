@@ -1,5 +1,8 @@
+#! /usr/bin/env python
+
 import pygame
 import random
+import time
 from pygame.locals import *
 
 BOX_SIDE    = 100
@@ -64,19 +67,20 @@ class Animation():
                 x_speed = MOVE_SPEED*cmp(self.target[0] - topleft[0], 0)
                 y_speed = MOVE_SPEED*cmp(self.target[1] - topleft[1], 0)
                 self.box.move((x_speed,y_speed))
-            else:
+            if self.box.rect.topleft == self.target:
+                self.finished = True
                 global boxs
                 boxs[self.target[0]/BLOCK_SIDE + COLS*(self.target[1]/BLOCK_SIDE)] = self.box
-                self.finished = True
         elif(self.action == "renew"):
             box_side = self.box.image.get_size()[0]
             if not box_side == 0:
                 self.box.image = pygame.transform.scale(self.box.image, (box_side - SCALE_SPEED, )*2)
                 self.box.move((SCALE_SPEED/2, )*2)
-            else:
+            if self.box.image.get_size()[0] == 0:
                 self.finished = True
                 self.box.move((-(self.box.rect.left%BLOCK_SIDE)+PADDING/2, ROWS*BLOCK_SIDE+PADDING/2-self.box.rect.top))
                 self.box.image = get_surface(self.target)
+                self.box.color = self.target
         else:
             self.finished = True
         self.first_run = False
@@ -181,9 +185,8 @@ def parse_command(command_str):
                     move_animation.target = (0, -1)
                     move_animation.parent = parent
                     animations.append(move_animation)
-                if len(landslips) == 2 and landslips[1] - landslips[0] == COLS:
+                if len(landslips) == 2 and landslips[0] - landslips[1] == COLS:
                     parent = animations[-1]
-                # break
             cmd_tmp[params[0]] = animations[-1]
 
     return animations
@@ -198,6 +201,9 @@ def run_animations(animations):
             new_animations.append(animation)
             if animation.parent and animation.parent.finished:
                 animation.parent = animation.parent.parent
+    if len(animations) > 1:
+        box = animations[-2].box
+        # print time.time(),box.color, "renew finished", box.rect.topleft, box.rect.bottomright
     return new_animations
 
 
