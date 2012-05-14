@@ -29,7 +29,6 @@ boxs =[]
 mirror_colors=[]
 animations=[]
 marked_index = -1
-surfaces={}
 
 class Box(pygame.sprite.Sprite):
     """pure color block as sprite which has two states: marked and unmarked"""
@@ -86,21 +85,15 @@ class Animation():
         self.first_run = False
 
 def get_random_color():
-    return  random.choice(COLORS.keys())
+    return random.choice(COLORS.keys())
 
 def get_different_color(color):
-    while True:
-        new_color = get_random_color()
-        if new_color != color:
-            return new_color
+    return random.choice(COLORS.keys().remove(color))
 
-def get_surface(color, marked = False):
-    global surfaces
+def get_surface(color, marked = False, surfaces = {}):
     key = color if not marked else color + "_MARKED"
     surface = surfaces.get(key)
-    if surface:
-        return surface
-    else:
+    if not surface:
         surface = pygame.Surface((BOX_SIDE, BOX_SIDE))
         surface.fill(COLORS[color])
         if marked:
@@ -108,7 +101,7 @@ def get_surface(color, marked = False):
             img_mark.fill(BG_COLOR)
             surface.blit(img_mark,((BOX_SIDE - MARK_SIDE)/2,(BOX_SIDE - MARK_SIDE)/2))
         surfaces[key] = surface
-        return surface
+    return surface
 
         
 def generate_boxs():
@@ -208,10 +201,7 @@ def run_animations(animations):
             new_animations.append(animation)
             if animation.parent and animation.parent.finished:
                 animation.parent = animation.parent.parent
-    if len(animations) > 1:
-        box = animations[-2].box
-        # print time.time(),box.color, "renew finished", box.rect.topleft, box.rect.bottomright
-    return new_animations
+    return new_animation    s
 
 
 def main():
