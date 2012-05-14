@@ -77,7 +77,7 @@ class Animation():
                 self.box.image = pygame.transform.scale(self.box.image, (box_side - SCALE_SPEED, )*2)
                 self.box.move((SCALE_SPEED/2, )*2)
             if self.box.image.get_size()[0] == 0:
-                self.finished = True
+                self.finished = True  
                 self.box.move((-(self.box.rect.left%BLOCK_SIDE)+PADDING/2, ROWS*BLOCK_SIDE+PADDING/2-self.box.rect.top))
                 self.box.image = get_surface(self.target)
                 self.box.color = self.target
@@ -165,6 +165,7 @@ def parse_command(command_str):
     commands = command_str.split(";")
     cmd_tmp = {}
     animations = []
+    global boxs
     for command in commands:
         params = command.split()
         animation = Animation(params[2], boxs[int(params[3])])
@@ -177,10 +178,16 @@ def parse_command(command_str):
             animation.target = params[4]
             animations.append(animation)
         elif animation.action == "landslip":
-            landslips = sorted([int(x) for x in params[3:]], reverse=True)
+            landslips = sorted(zip([int(x) for x in params[3::2]], params[4::2]), reverse=True)
             parent = animation.parent
-            for start_index in landslips:
-                for box in boxs[start_index::COLS]:
+            for i, (slip_at, new_color) in enumerate(landslips):
+                renew = Animation("renew", boxs[slip_at])
+                renew.target = ((boxs[slip_at].rect.left, (ROWS+len(landslips)-1-i)*BLOCK_SIDE + PADDING/2), new_color)
+                renew.parent = animation.parent
+                animations.append(renew)
+                move_animation = Animation("move", boxs[slip_at])
+                for a, b in [(i, i + COLS) for i in range(slip_at, len(boxs) - COLS, COLS)]:
+                    boxs[a], boxs[b] = boxs[b], boxs[a]
                     move_animation = Animation("move", box)
                     move_animation.target = (0, -1)
                     move_animation.parent = parent
