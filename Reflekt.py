@@ -115,6 +115,11 @@ def pos_to_index(pos):
     index =  pos[0]/BOX_SIDE + COLS*(pos[1]/BOX_SIDE)
     return index if index >= 0 and index < COLS*ROWS else -1
 
+def who_is_at(index, boxs):
+    for box in boxs:
+        if box.rect.topleft == index_to_pos(index):
+            return box
+
 def index_to_pos(index):
     return ((index%COLS)*BOX_SIDE, (index/COLS)*BOX_SIDE)
 
@@ -139,14 +144,13 @@ def click_at(pos, boxs, marked_index):
         boxs[clicked_index].mark(False)
         marked_index = -1
     elif is_around(clicked_index, marked_index):
-        marked_box = boxs[marked_index]
-        clicked_box = boxs[clicked_index]
-        marked_box.mark(False)
+        boxs[marked_index].mark(False)
+
         cmds.append("switch %s %s" % (clicked_index, marked_index))
         # cmds.append("3 1 renew %s %s" % (clicked_index, get_random_color()))
         # cmds.append("4 2 renew %s %s" % (marked_index, get_random_color()))
-        # cmds.append("landslip %s %s %s %s"  % (clicked_index, get_random_color(), marked_index, get_random_color()))
-        cmds.append("landslip %s %s"  % (clicked_index, get_random_color()))
+        cmds.append("landslip %s %s %s %s"  % (clicked_index, get_random_color(), marked_index, get_random_color()))
+        # cmds.append("landslip %s %s"  % (clicked_index, get_random_color()))
 
         marked_index = -1
     return cmds, marked_index
@@ -161,29 +165,29 @@ def parse_command(command_str, boxs):
             f_index = int(params[1])
             t_index = int(params[2])
             animation = Animation("move", boxs[f_index])
-            animation.target = index_to_pos(t_index)
+            animation.target = boxs[t_index].rect.topleft
             animations.append(animation)
             animation = Animation("move", boxs[t_index])
-            animation.target = index_to_pos(f_index)
+            animation.target = boxs[f_index].rect.topleft
             animations.append(animation)
-            # boxs[f_index], boxs[t_index] = boxs[t_index], boxs[f_index]
+            boxs[f_index], boxs[t_index] = boxs[t_index], boxs[f_index]
         elif action == "landslip":
             landslips = sorted(zip([int(x) for x in params[1::2]], params[2::2]), reverse=True)
             renew_parent = animations[-1]
             flag = -1
             for i, (slip_at, new_color) in enumerate(landslips):
                 renew = Animation("renew", boxs[slip_at])
-                renew.target = (new_color, (boxs[slip_at].rect.left, ROWS*BOX_SIDE))
+                renew.target = (new_color, (index_to_pos(slip_at)[0], ROWS*BOX_SIDE))
                 renew.parent = renew_parent 
                 animations.append(renew)
                 if col_gap(slip_at, flag) == 0:
                     move_parent = animations[-2]
                 else:
-                    move_parent = animations[-1]
+                    move_parent = renew
                 flag = slip_at
 
                 move_animation = Animation("move", boxs[slip_at])
-                move_animation.target = (boxs[slip_at].rect.left, (ROWS - 1)*BOX_SIDE)
+                move_animation.target = (index_to_pos(slip_at)[0], (ROWS - 1)*BOX_SIDE)
                 move_animation.parent = move_parent
                 animations.append(move_animation)
 
