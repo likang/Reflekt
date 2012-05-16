@@ -3,8 +3,11 @@
 import pygame
 import random
 import time
+import threading
+import Queue
+import sys
 from pygame.locals import *
-from multiprocessing import Pipe
+from multiprocessing.connection import Client, Listener
 
 IMG_SIDE    = 100
 MARK_SIDE   = 20
@@ -143,15 +146,18 @@ def click_at(pos, boxs, marked_index):
         boxs[marked_index].mark(False)
 
         cmds.append("switch %s %s" % (clicked_index, marked_index))
-        cmds.append("landslip %s %s"  % (clicked_index, get_random_color()))
+        color = get_random_color() 
+        cmds.append("landslip %s %s %s"  % (clicked_index, color, get_different_color(color))
 
         marked_index = -1
     return cmds, marked_index
 
-def parse_command(command_str, boxs):
+def parse_command(command_str, boxs, role, mirror_colors = None):
     commands = command_str.split(";")
     animations = []
     for command in commands:
+        if len(command.strip()) == 0:
+            continue
         params = command.split()
         action = params[0]
         if action == "switch":
@@ -165,11 +171,12 @@ def parse_command(command_str, boxs):
             animations.append(move)
             boxs[f_index], boxs[t_index] = boxs[t_index], boxs[f_index]
         elif action == "landslip":
-            landslips = sorted(zip([int(x) for x in params[1::2]], params[2::2]), reverse=True)
+            landslips = sorted(zip([int(x) for x in params[1::2]], params[2::2], params[3::2]), reverse=True)
             renew_parent = animations[-1]
             flag = -1
-            for slip_at, new_color in landslips:
+            for slip_at, new_color, mirror_color in landslips:
                 renew = Animation("renew", boxs[slip_at])
+                color = new_color if role == "sender" else mirror_color
                 renew.target = (new_color, (index_to_pos(slip_at)[0], ROWS*BOX_SIDE))
                 renew.parent = renew_parent 
                 animations.append(renew)
@@ -203,12 +210,42 @@ def run_animations(animations):
                 animation.parent = animation.parent.parent
     return new_animations
 
+class BridgeSender(threading.Thread):
+    def __init__(self, queue):
+        threading.Thread.__init__(self)
+        self.queue = queue
+    def run(self):
+        address = ('localhost', 6000) 
+        listener = Listener(address, authkey='secret password')
+        conn = listener.accept()
+        while True:
+            command = self.queue.get()
+            conn.send_bytes(command)
+            self.queue.task_done()
+            if command == 'quit':
+                break
 
-def main(pipe, role):
+class BridgeReceiver(threading.Thread):
+    def __init__(self, animations, boxs):
+        threading.Thread.__init__(self)
+        self.animations = animations
+        self.boxs = boxs
+    def run(self):
+        address = ('localhost', 6000) 
+        conn = Client(address, authkey='secret password')
+        while True:
+            command = conn.recv_bytes()
+            if command == 'quit':
+                break
+            self.animations[:] = parse_command(command, self.boxs, "receiver")
+
+
+
+def main(role):
     # Initialise screen
     pygame.init()
     screen = pygame.display.set_mode((BOX_SIDE * COLS, BOX_SIDE * ROWS))
-    pygame.display.set_caption("Mirror Mirror")
+    pygame.display.set_caption("Mirror Mirror - %s" % role)
 
     # Fill background
     background = pygame.Surface(screen.get_size())
@@ -216,42 +253,55 @@ def main(pipe, role):
     background.fill(BG_COLOR)
 
     cmds = []
-    mirror_colors=[]
     animations=[]
     marked_index = -1
     boxs = generate_boxs()
+    mirror_colors=generate_mirror_colors()
+
+    if role == "sender":
+        queue = Queue.Queue()
+        bridge = BridgeSender(queue)
+    else:
+        bridge = BridgeReceiver(animations, boxs)
+    bridge.start()
 
     clock = pygame.time.Clock()
-    while 1:
+    while True:
         clock.tick(60)
-        if len(animations) == 0 and len(cmds) > 0:
-            if role == "sender":
-                command = ";".join(cmds)
-                # pipe.send_bytes(command)
-            else:
-                command = pipe.recv_bytes()
-            animations = parse_command(";".join(cmds), boxs)
-            cmds = []
+        if not bridge.isAlive():
+            return
+
         if len(animations) > 0:
-            animations = run_animations(animations)
-        for event in pygame.event.get():
-            if event.type == QUIT:
-                return
-            elif event.type == MOUSEBUTTONUP:
-                if len(animations) == 0:
-                    cmds, marked_index = click_at(event.pos, boxs, marked_index)
+            animations[:] = run_animations(animations)
+
+        if role == "sender":
+            if len(animations) == 0 and len(cmds) > 0:
+                command = ";".join(cmds)
+                animations[:] = parse_command(command, boxs, "sender", mirror_colors)
+                cmds = []
+                queue.put(command)
+
+            for event in pygame.event.get():
+                if event.type == QUIT:
+                    queue.put("quit")
+                elif event.type == MOUSEBUTTONUP:
+                    if len(animations) == 0:
+                        cmds, marked_index = click_at(event.pos, boxs, marked_index)
+
         screen.blit(background, (0,0))
         for box in boxs:
             screen.blit(box.image, box.rect)
-        if IN_MIRROR:
+
+        if role != "sender":
             mirror = pygame.transform.flip(screen, False, True)
             screen.blit(background, (0,0))
             screen.blit(mirror, (0,0))
+
         pygame.display.flip()
 
 if __name__ == '__main__': 
-    # sender, receiver = Pipe()
-    # p = Process(target=main, args=(receiver, "receiver"))
-    # p.start()
-    main(None, "sender")
-    # p.join()    
+    if len(sys.argv) == 1:
+        main("sender")
+    else:
+        main("receiver")
+
