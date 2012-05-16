@@ -227,8 +227,8 @@ def main(pipe, role):
         if len(animations) == 0 and len(cmds) > 0:
             if role == "sender":
                 command = ";".join(cmds)
-                pipe.send_bytes(command)
-            else
+                # pipe.send_bytes(command)
+            else:
                 command = pipe.recv_bytes()
             animations = parse_command(";".join(cmds), boxs)
             cmds = []
@@ -250,8 +250,8 @@ def main(pipe, role):
         pygame.display.flip()
 
 if __name__ == '__main__': 
-    sender, receiver = Pipe()
-    p = Process(target=main, args=(receiver, "receiver"))
-    p.start()
-    main(sender, "sender")
-    p.join()    
+    # sender, receiver = Pipe()
+    # p = Process(target=main, args=(receiver, "receiver"))
+    # p.start()
+    main(None, "sender")
+    # p.join()    
