@@ -1,11 +1,11 @@
 #! /usr/bin/env python
 
-import pygame
-import random
-import time
-import threading
-import Queue
 import sys
+import os
+import random
+import Queue
+import threading
+import pygame
 from pygame.locals import *
 from multiprocessing.connection import Client, Listener
 
@@ -17,7 +17,6 @@ COLS        = 6
 MOVE_SPEED  = 8     # BOX_SIDE must be divided by MOVE_SPPED exactly
 SCALE_SPEED = 10    # 
 BOX_SIDE    = IMG_SIDE + PADDING*2
-IN_MIRROR   = False
 
 BG_COLOR    = (0,0,0)
 COLORS = {
@@ -26,7 +25,7 @@ COLORS = {
     "ORANGE"    : (250,140,66 ),
     "PURPLE"    : (142,133,226),
     "BLUE"      : (64 ,178,223),
-    "LIGHTGREEN": (237,254,235),
+    "WHITE": (237,254,235),
     }
 
 class Box(pygame.sprite.Sprite):
@@ -83,7 +82,9 @@ def get_random_color():
     return random.choice(COLORS.keys())
 
 def get_different_color(color):
-    return random.choice(COLORS.keys().remove(color))
+    keys = COLORS.keys()
+    keys.remove(color)
+    return random.choice(keys)
 
 def get_surface(color, marked = False, surfaces = {}):
     key = color if not marked else color + "_MARKED"
@@ -102,18 +103,17 @@ def get_surface(color, marked = False, surfaces = {}):
     return surface
 
         
-def generate_boxs():
-    boxs = [] 
-    for y in range(0,ROWS):
-        for x in range(0,COLS):
-            color = get_random_color()
-            b = Box(color , (BOX_SIDE*x, BOX_SIDE*y))
-            boxs.append(b)
-    return boxs
+def generate_boxs(colors):
+    return [Box(color, index_to_pos(i)) for i, color in enumerate(colors)]
 
-def generate_mirror_colors(boxs):
-    for box in boxs:
-        colr = box.color
+def generate_colors(len):
+    colors = [get_random_color() for i in range(len)]
+    return colors
+
+def generate_mirror_colors(colors):
+    mirror_colors = [get_different_color(color) for color in colors]
+    return mirror_colors
+
 
 def pos_to_index(pos):
     index =  pos[0]/BOX_SIDE + COLS*(pos[1]/BOX_SIDE)
@@ -131,7 +131,7 @@ def col_difference(you, me):
 def is_around(you, me):
     return abs(row_difference(you, me)) + abs(col_difference(you, me)) in (1,0)
 
-def click_at(pos, boxs, marked_index):
+def click_at(pos, boxs, marked_index, mirror_colors):
     clicked_index= pos_to_index(pos)
     cmds = []
     if clicked_index == -1:
@@ -145,14 +145,19 @@ def click_at(pos, boxs, marked_index):
     elif is_around(clicked_index, marked_index):
         boxs[marked_index].mark(False)
 
-        cmds.append("switch %s %s" % (clicked_index, marked_index))
-        color = get_random_color() 
-        cmds.append("landslip %s %s %s"  % (clicked_index, color, get_different_color(color))
+        if boxs[clicked_index].color == mirror_colors[marked_index] or boxs[marked_index].color == mirror_colors[clicked_index]:
+            cmds.append("switch %s %s" % (clicked_index, marked_index))
+            if boxs[clicked_index].color == mirror_colors[marked_index]:
+                color = get_random_color() 
+                cmds.append("landslip %s %s %s"  % (marked_index, color, get_different_color(color)))
+            if boxs[marked_index].color == mirror_colors[clicked_index]:
+                color = get_random_color() 
+                cmds.append("landslip %s %s %s"  % (clicked_index, color, get_different_color(color)))
 
         marked_index = -1
     return cmds, marked_index
 
-def parse_command(command_str, boxs, role, mirror_colors = None):
+def parse_command(command_str, boxs, in_mirror, mirror_colors = None):
     commands = command_str.split(";")
     animations = []
     for command in commands:
@@ -160,7 +165,12 @@ def parse_command(command_str, boxs, role, mirror_colors = None):
             continue
         params = command.split()
         action = params[0]
-        if action == "switch":
+        if action == "init":
+            colors = params[1:]
+            boxs[:] = generate_boxs(colors)
+        elif action == "switch":
+            if in_mirror:
+                continue
             f_index = int(params[1])
             t_index = int(params[2])
             move = Animation("move", boxs[f_index])
@@ -170,18 +180,21 @@ def parse_command(command_str, boxs, role, mirror_colors = None):
             move.target = boxs[f_index].rect.topleft
             animations.append(move)
             boxs[f_index], boxs[t_index] = boxs[t_index], boxs[f_index]
+
         elif action == "landslip":
-            landslips = sorted(zip([int(x) for x in params[1::2]], params[2::2], params[3::2]), reverse=True)
-            renew_parent = animations[-1]
+            landslips = sorted(zip([int(x) for x in params[1::3]], params[2::3], params[3::3]), reverse=True)
+            renew_parent = animations[-1] if len(animations) > 0 else None
             flag = -1
             for slip_at, new_color, mirror_color in landslips:
                 renew = Animation("renew", boxs[slip_at])
-                color = new_color if role == "sender" else mirror_color
-                renew.target = (new_color, (index_to_pos(slip_at)[0], ROWS*BOX_SIDE))
+                target_color = new_color if not in_mirror else mirror_color
+                renew.target = (target_color, (index_to_pos(slip_at)[0], ROWS*BOX_SIDE))
                 renew.parent = renew_parent 
                 animations.append(renew)
+                if mirror_colors:
+                    mirror_colors[slip_at] = mirror_color
 
-                move_parent = animations[-2] if col_difference(slip_at, flag) == 0 else renew
+                move_parent = animations[-2] if col_difference(slip_at, flag) == 0 and len(animations)>1 else renew
                 flag = slip_at
 
                 move = Animation("move", boxs[slip_at])
@@ -195,6 +208,8 @@ def parse_command(command_str, boxs, role, mirror_colors = None):
                     move.parent = move_parent
                     animations.append(move)
                     boxs[a], boxs[b] = boxs[b], boxs[a]
+                    if mirror_colors:
+                        mirror_colors[a], mirror_colors[b] = mirror_colors[b], mirror_colors[a]
 
     return animations
 
@@ -222,8 +237,9 @@ class BridgeSender(threading.Thread):
             command = self.queue.get()
             conn.send_bytes(command)
             self.queue.task_done()
-            if command == 'quit':
-                break
+            if command == 'quit': break
+        conn.close()
+        listener.close()
 
 class BridgeReceiver(threading.Thread):
     def __init__(self, animations, boxs):
@@ -235,17 +251,24 @@ class BridgeReceiver(threading.Thread):
         conn = Client(address, authkey='secret password')
         while True:
             command = conn.recv_bytes()
-            if command == 'quit':
-                break
+            if command == 'quit': break
             self.animations[:] = parse_command(command, self.boxs, "receiver")
+        conn.close()
 
 
 
-def main(role):
+def main(in_mirror = False):
+    if in_mirror:
+        os.environ['SDL_VIDEO_WINDOW_POS'] = '0,0'
+        title = "Mirror Mirror - Mirror"
+    else:
+        os.environ['SDL_VIDEO_WINDOW_POS'] = '0,%s' % (ROWS*BOX_SIDE + 20,)
+        title = "Mirror Mirror - Main"
+
     # Initialise screen
     pygame.init()
     screen = pygame.display.set_mode((BOX_SIDE * COLS, BOX_SIDE * ROWS))
-    pygame.display.set_caption("Mirror Mirror - %s" % role)
+    pygame.display.set_caption(title )
 
     # Fill background
     background = pygame.Surface(screen.get_size())
@@ -255,12 +278,15 @@ def main(role):
     cmds = []
     animations=[]
     marked_index = -1
-    boxs = generate_boxs()
-    mirror_colors=generate_mirror_colors()
+    boxs = []
+    mirror_colors = []
 
-    if role == "sender":
+    if not in_mirror:
         queue = Queue.Queue()
         bridge = BridgeSender(queue)
+        colors = generate_colors(COLS*ROWS)
+        cmds.append("init %s" % " ".join(colors))
+        mirror_colors = generate_mirror_colors(colors)
     else:
         bridge = BridgeReceiver(animations, boxs)
     bridge.start()
@@ -274,25 +300,31 @@ def main(role):
         if len(animations) > 0:
             animations[:] = run_animations(animations)
 
-        if role == "sender":
+        if not in_mirror:
             if len(animations) == 0 and len(cmds) > 0:
                 command = ";".join(cmds)
-                animations[:] = parse_command(command, boxs, "sender", mirror_colors)
+                animations[:] = parse_command(command, boxs, in_mirror, mirror_colors)
+
+                # command filter
+                for i,cmd in enumerate(cmds):
+                    args = cmd.split()
+                    if args[0] == "init":
+                        cmds[i] = "init %s" % " ".join(mirror_colors)
+                queue.put(";".join(cmds))
                 cmds = []
-                queue.put(command)
 
             for event in pygame.event.get():
                 if event.type == QUIT:
                     queue.put("quit")
                 elif event.type == MOUSEBUTTONUP:
                     if len(animations) == 0:
-                        cmds, marked_index = click_at(event.pos, boxs, marked_index)
+                        cmds, marked_index = click_at(event.pos, boxs, marked_index, mirror_colors)
 
         screen.blit(background, (0,0))
         for box in boxs:
             screen.blit(box.image, box.rect)
 
-        if role != "sender":
+        if in_mirror:
             mirror = pygame.transform.flip(screen, False, True)
             screen.blit(background, (0,0))
             screen.blit(mirror, (0,0))
@@ -301,7 +333,7 @@ def main(role):
 
 if __name__ == '__main__': 
     if len(sys.argv) == 1:
-        main("sender")
+        main()
     else:
-        main("receiver")
+        main(True)
 
